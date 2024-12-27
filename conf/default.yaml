@@ -1,0 +1,19 @@
+version: 0.1.0
+
+db:
+  mongo:
+    url: "mongodb://192.168.0.138:30001"
+  ch:
+    url: "clickhouse://root:vervn1234@192.168.0.138:30005"
+
+franchisee:
+  days: 7
+  ns:
+    - hxfx01
+
+server:
+  host: 127.0.0.1
+  port: 5555
+  auth:
+    - vervn
+    - vervn1234
