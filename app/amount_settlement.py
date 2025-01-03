@@ -1,4 +1,5 @@
 from datetime import datetime
+from pathlib import Path
 
 import gradio as gr
 from gradio_calendar import Calendar
@@ -103,6 +104,15 @@ def get_settlement(franchisee, start_date, end_date):
         start_date = start_date.date().isoformat()
     if type(end_date) == datetime:
         end_date = end_date.date().isoformat()
+
+    output_file = Path(f'./data/{franchisee}_{start_date}至{end_date}_结算金额表.xlsx')
+    
+    # 检查文件是否存在
+    if output_file.exists():
+        print(f"文件已存在，直接读取: {output_file}")
+        df_total = pd.read_excel(output_file, sheet_name='汇总结算')
+        return df_total, str(output_file)
+
     df_scene_data = get_df_scene(franchisee, start_date, end_date)
     df_stat_data = get_df_stat(franchisee, start_date, end_date)
     df_shop_count_unique = get_df_shop_count(franchisee, start_date, end_date)
@@ -154,7 +164,6 @@ def get_settlement(franchisee, start_date, end_date):
     df_total = pd.DataFrame(total_sum)
     
     # 导出表格为Excel文件，每个平台一个sheet
-    output_file = f'./data/{franchisee}_{start_date}至{end_date}_结算金额表.xlsx'
     with pd.ExcelWriter(output_file) as writer:
         df_total.to_excel(writer, sheet_name='汇总结算', index=False)
         df_merge_new.to_excel(writer, sheet_name='总表', index=False)
@@ -163,7 +172,7 @@ def get_settlement(franchisee, start_date, end_date):
         df_pinduoduo.to_excel(writer, sheet_name='拼多多', index=False)
 
     print(f"表格已导出至 {output_file}")
-    return df_total, output_file
+    return df_total, str(output_file)
 
 def check_date(s_date, e_date):
     if e_date < s_date:
