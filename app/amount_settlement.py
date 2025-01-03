@@ -105,77 +105,101 @@ def get_settlement(franchisee, start_date, end_date, use_cache="是"):
     if type(end_date) == datetime:
         end_date = end_date.date().isoformat()
 
+    if franchisee == "total":
+        org_domain_id_map = get_org_domain_id_map()
+        fr_list = list(org_domain_id_map.keys())
+    else:
+        fr_list = [franchisee]
+
     output_file = Path(f'./data/{franchisee}_{start_date}至{end_date}_结算金额表.xlsx')
-    
+
     # 检查文件是否存在且是否使用缓存
     if output_file.exists() and use_cache == "是":
         print(f"文件已存在，直接读取: {output_file}")
         df_total = pd.read_excel(output_file, sheet_name='汇总结算')
         return df_total, str(output_file)
-
-    df_scene_data = get_df_scene(franchisee, start_date, end_date)
-    df_stat_data = get_df_stat(franchisee, start_date, end_date)
-    df_shop_count_unique = get_df_shop_count(franchisee, start_date, end_date)
-
-    # 拼接 df，按照平台和用户ID匹配
-    df_with_shop_count = pd.merge(df_stat_data, df_shop_count_unique, how='left', on=['平台', '用户ID']).fillna(0)
-    df_with_shop_count_and_scene = pd.merge(df_with_shop_count, df_scene_data, how='left', on=['平台', '用户ID']).fillna(0)
-
-    df_with_shop_count_and_scene["机器人接待人次"] = df_with_shop_count_and_scene.apply(
-        lambda row: round((row["机器人回复问题数"] + (row["情景回复数"] / 2)) / PLATFORM_RECEPTION_RATIO[row["平台"]], 2), axis=1)
-    df_with_shop_count_and_scene["预计结算金额（按照流量计算）"] = round(df_with_shop_count_and_scene["机器人接待人次"] * 0.134, 2)
-
-    df_merge = df_with_shop_count_and_scene.groupby(["用户ID", "客服姓名", "手机号", "客服部门"]).sum(
-        ["总接待人次", "总问题数", "机器人应回复问题数", "机器人识别问题数", "机器人回复问题数"])
-    online_hours = get_online_time(franchisee, start_date, end_date)
-    df_merge["总在线时长"] = [online_hours.get(x, 0) for x in df_merge.index.get_level_values("用户ID").values]
-    df_merge["预计坐席基数"] = df_merge["总在线时长"].apply(lambda x: max(0, x - (30 * 2)) // (30 * 8) + 1)
-    df_merge["预计结算金额"] = df_merge.apply(lambda x: 180 * x["预计坐席基数"], axis=1)
-    df_merge["坐席基数（新人优惠活动）"] = df_merge.apply(lambda x: 0 if x["预计结算金额（按照流量计算）"] < 180 else x["预计坐席基数"], axis=1)
-    df_merge["实际结算金额（新人优惠活动）"] = df_merge.apply(lambda x: (180 if x["预计结算金额（按照流量计算）"] >= 180 else 0) * x["坐席基数（新人优惠活动）"], axis=1)
-    df_merge["净识别率"] = round(df_merge["机器人识别问题数"] / df_merge["总问题数"], 4)
-    df_merge["净回复率"] = round(df_merge["机器人回复问题数"] / df_merge["总问题数"], 4)
-    df_merge["配置率"] = round(df_merge["净回复率"] / df_merge["净识别率"], 4)
-
-    # 将索引转化为正常的列
-    df_merge_new = df_merge.reset_index()
-    df_merge_new = df_merge_new[df_merge_new["客服部门"].apply(lambda x: x.split("/")[-1] != "系统部门")]
-    df_merge_new = df_merge_new.drop(columns=["用户ID"])
-
-    # 按平台拆分数据
-    df_with_shop_count_and_scene = df_with_shop_count_and_scene[df_with_shop_count_and_scene["客服部门"].apply(
-        lambda x: x.split("/")[-1] != "系统部门")]
-    df_with_shop_count_and_scene = df_with_shop_count_and_scene.drop(columns=["用户ID"])
-    df_taobao = df_with_shop_count_and_scene[df_with_shop_count_and_scene['平台'] == '淘系']
-    df_douyin = df_with_shop_count_and_scene[df_with_shop_count_and_scene['平台'] == '抖音']
-    df_pinduoduo = df_with_shop_count_and_scene[df_with_shop_count_and_scene['平台'] == '拼多多']
-
-    # 汇总结算
-    total_sum = [{
-        "公司名称": franchisee,
-        "业务结算区间": f"{start_date}至{end_date}",
-        "实际结算时间": today(),
-        "结算方式": "按实际坐席数量（新人优惠活动）",
-        "坐席单价": 180,
-        "预计坐席数量": df_merge_new["预计坐席基数"].sum(),
-        "实际坐席数量（新人优惠活动）": df_merge_new["坐席基数（新人优惠活动）"].sum(),
-        "预计结算金额（按照流量计算）": int(df_merge_new["预计结算金额（按照流量计算）"].sum()),
-        "预计结算金额": int(df_merge_new["预计结算金额"].sum()),
-        "实际结算金额（新人优惠活动）": int(df_merge_new["实际结算金额（新人优惠活动）"].sum()),
-        "预计节省人力总成本": int(int(df_merge_new["预计结算金额（按照流量计算）"].sum()) - int(df_merge_new["实际结算金额（新人优惠活动）"].sum())),
-        "新人优惠活动减免成本": int(int(df_merge_new["预计结算金额"].sum()) - int(df_merge_new["实际结算金额（新人优惠活动）"].sum()))
-    }]
-    df_total = pd.DataFrame(total_sum)
     
-    # 导出表格为Excel文件，每个平台一个sheet
+    if not output_file.exists() or use_cache == "否":
+        gr.Warning("全部加盟商数据一起计算，请耐心等待...")
+
+    fr_total_sum = []
+    for franchisee in fr_list:
+        print(franchisee)
+        df_scene_data = get_df_scene(franchisee, start_date, end_date)
+        df_stat_data = get_df_stat(franchisee, start_date, end_date)
+        df_shop_count_unique = get_df_shop_count(franchisee, start_date, end_date)
+
+        # 拼接 df，按照平台和用户ID匹配
+        df_with_shop_count = pd.merge(df_stat_data, df_shop_count_unique, how='left', on=['平台', '用户ID']).fillna(0)
+        df_with_shop_count_and_scene = pd.merge(df_with_shop_count, df_scene_data, how='left', on=['平台', '用户ID']).fillna(0)
+
+        df_with_shop_count_and_scene["机器人接待人次"] = df_with_shop_count_and_scene.apply(
+            lambda row: round((row["机器人回复问题数"] + (row["情景回复数"] / 2)) / PLATFORM_RECEPTION_RATIO[row["平台"]], 2), axis=1)
+        df_with_shop_count_and_scene["预计人力成本（按照流量计算）"] = round(df_with_shop_count_and_scene["机器人接待人次"] * 0.134, 2)
+
+        df_merge = df_with_shop_count_and_scene.groupby(["用户ID", "客服姓名", "手机号", "客服部门"]).sum(
+            ["总接待人次", "总问题数", "机器人应回复问题数", "机器人识别问题数", "机器人回复问题数"])
+        online_hours = get_online_time(franchisee, start_date, end_date)
+        df_merge["总在线时长"] = [online_hours.get(x, 0) for x in df_merge.index.get_level_values("用户ID").values]
+        df_merge["预计坐席基数"] = df_merge["总在线时长"].apply(lambda x: max(0, x - (30 * 2)) // (30 * 8) + 1)
+        df_merge["预计结算金额"] = df_merge.apply(lambda x: 180 * x["预计坐席基数"], axis=1)
+        df_merge["坐席基数（新人优惠活动）"] = df_merge.apply(lambda x: 0 if x["预计人力成本（按照流量计算）"] < 180 else x["预计坐席基数"], axis=1)
+        df_merge["实际结算金额（新人优惠活动）"] = df_merge.apply(lambda x: (180 if x["预计人力成本（按照流量计算）"] >= 180 else 0) * x["坐席基数（新人优惠活动）"], axis=1)
+        df_merge["净识别率"] = round(df_merge["机器人识别问题数"] / df_merge["总问题数"], 4)
+        df_merge["净回复率"] = round(df_merge["机器人回复问题数"] / df_merge["总问题数"], 4)
+        df_merge["配置率"] = round(df_merge["净回复率"] / df_merge["净识别率"], 4)
+
+        # 将索引转化为正常的列
+        df_merge_new = df_merge.reset_index()
+        df_merge_new = df_merge_new[df_merge_new["客服部门"].apply(lambda x: x.split("/")[-1] != "系统部门")]
+        df_merge_new = df_merge_new.drop(columns=["用户ID"])
+
+
+        # 汇总结算
+        total_sum = [{
+            "公司名称": franchisee,
+            "业务结算区间": f"{start_date}至{end_date}",
+            "实际结算时间": today(),
+            "结算方式": "按实际坐席数量（新人优惠活动）",
+            "坐席单价": 180,
+            "预计坐席数量": df_merge_new["预计坐席基数"].sum(),
+            "实际坐席数量（新人优惠活动）": df_merge_new["坐席基数（新人优惠活动）"].sum(),
+            "预计人力成本（按照流量计算）": int(df_merge_new["预计人力成本（按照流量计算）"].sum()),
+            "预计结算金额": int(df_merge_new["预计结算金额"].sum()),
+            "实际结算金额（新人优惠活动）": int(df_merge_new["实际结算金额（新人优惠活动）"].sum()),
+            "预计节省人力总成本": int(int(df_merge_new["预计人力成本（按照流量计算）"].sum()) - int(df_merge_new["实际结算金额（新人优惠活动）"].sum())),
+            "新人优惠活动减免成本": int(int(df_merge_new["预计结算金额"].sum()) - int(df_merge_new["实际结算金额（新人优惠活动）"].sum())),
+            "结算率": str(round(int(df_merge_new["实际结算金额（新人优惠活动）"].sum()) * 100 / int(df_merge_new["预计人力成本（按照流量计算）"].sum()), 2)) + "%"
+        }]
+
+        if len(fr_list) == 1:
+            df_total = pd.DataFrame(total_sum)
+
+            # 按平台拆分数据
+            df_with_shop_count_and_scene = df_with_shop_count_and_scene[df_with_shop_count_and_scene["客服部门"].apply(
+                lambda x: x.split("/")[-1] != "系统部门")]
+            df_with_shop_count_and_scene = df_with_shop_count_and_scene.drop(columns=["用户ID"])
+            df_taobao = df_with_shop_count_and_scene[df_with_shop_count_and_scene['平台'] == '淘系']
+            df_douyin = df_with_shop_count_and_scene[df_with_shop_count_and_scene['平台'] == '抖音']
+            df_pinduoduo = df_with_shop_count_and_scene[df_with_shop_count_and_scene['平台'] == '拼多多']
+
+            # 导出表格为Excel文件，每个平台一个sheet
+            with pd.ExcelWriter(output_file) as writer:
+                df_total.to_excel(writer, sheet_name='汇总结算', index=False)
+                df_merge_new.to_excel(writer, sheet_name='总表', index=False)
+                df_taobao.to_excel(writer, sheet_name='淘系', index=False)
+                df_douyin.to_excel(writer, sheet_name='抖音', index=False)
+                df_pinduoduo.to_excel(writer, sheet_name='拼多多', index=False)
+
+            print(f"表格已导出至 {output_file}")
+            return df_total, str(output_file)
+        else:
+            fr_total_sum.extend(total_sum)
+
+    df_total = pd.DataFrame(fr_total_sum)
     with pd.ExcelWriter(output_file) as writer:
         df_total.to_excel(writer, sheet_name='汇总结算', index=False)
-        df_merge_new.to_excel(writer, sheet_name='总表', index=False)
-        df_taobao.to_excel(writer, sheet_name='淘系', index=False)
-        df_douyin.to_excel(writer, sheet_name='抖音', index=False)
-        df_pinduoduo.to_excel(writer, sheet_name='拼多多', index=False)
 
-    print(f"表格已导出至 {output_file}")
     return df_total, str(output_file)
 
 def check_date(s_date, e_date):
@@ -195,7 +219,7 @@ def settlement_tab():
                                         interactive=True)
                 with gr.Column():
                     franchisee_input = gr.Radio(
-                        choices=list(org_domain_id_map.keys()),
+                        choices=list(org_domain_id_map.keys()) + ["total"],
                         value=list(org_domain_id_map.keys())[0],
                         label="选择加盟商",
                         interactive=True,
