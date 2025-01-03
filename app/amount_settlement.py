@@ -172,7 +172,7 @@ def check_date(s_date, e_date):
 def settlement_tab():
     org_domain_id_map = get_org_domain_id_map()
     with gr.Tab("加盟商金额结算"):
-        gr.Markdown("# 📊 Chat Log From Mongodb Statistics")
+        gr.Markdown("# 💰 Franchisee Amount Settlement")
         with gr.Row():
             with gr.Column():
                 with gr.Row():
