@@ -119,7 +119,7 @@ def get_settlement(franchisee, start_date, end_date, use_cache="是"):
         df_total = pd.read_excel(output_file, sheet_name='汇总结算')
         return df_total, str(output_file)
     
-    if not output_file.exists() or use_cache == "否":
+    if franchisee == "total" and (not output_file.exists() or use_cache == "否"):
         gr.Warning("全部加盟商数据一起计算，请耐心等待...")
 
     fr_total_sum = []
@@ -148,6 +148,7 @@ def get_settlement(franchisee, start_date, end_date, use_cache="是"):
         df_merge["净识别率"] = round(df_merge["机器人识别问题数"] / df_merge["总问题数"], 4)
         df_merge["净回复率"] = round(df_merge["机器人回复问题数"] / df_merge["总问题数"], 4)
         df_merge["配置率"] = round(df_merge["净回复率"] / df_merge["净识别率"], 4)
+        df_merge["结算率"] = df_merge.apply(lambda x: round(x["实际结算金额（新人优惠活动）"] * 100 / x["预计人力成本（按照流量计算）"], 2), axis=1)
 
         # 将索引转化为正常的列
         df_merge_new = df_merge.reset_index()
@@ -253,6 +254,6 @@ def settlement_tab():
 if __name__ == '__main__':
     start, *_, end = get_month_days(-1)
     # for fr in ["hengyang", "syzy01", "hongjun", "xiaoyi"]:
-    for fr in ["xiaoyi"]:
+    for fr in ["syzy01"]:
         print(fr)
-        get_settlement(fr, start, end)
+        get_settlement(fr, start, end, False)
