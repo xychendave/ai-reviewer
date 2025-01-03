@@ -3,11 +3,13 @@ import gradio as gr
 from util.conf import get_conf
 from app.chat_log_stat import chat_log_tab
 from app.chat_log_with_question_stat import chat_log_with_question_tab
+from app.amount_settlement import settlement_tab
 
 conf = get_conf()
 
 # Gradio 界面
 with gr.Blocks() as app:
+    settlement_tab()
     chat_log_with_question_tab()
     chat_log_tab()
 

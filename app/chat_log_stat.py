@@ -5,6 +5,7 @@ from ashe import get_interval_days, yesterday
 
 from util.db import get_mongo_client
 from util.conf import get_conf
+from util.franchisee import get_org_domain_id_map
 
 conf = get_conf()
 client = get_mongo_client()
@@ -74,11 +75,12 @@ def chat_log_tab():
 
         plot_output = gr.Plot()
 
+        org_domain_id_map = get_org_domain_id_map()
         with gr.Row():
             days_input = gr.Number(value=conf["franchisee"]["days"], label="查询天数", minimum=1, step=1)
             franchisee_input = gr.Checkboxgroup(
-                choices=conf["franchisee"]["ns"],
-                value=conf["franchisee"]["ns"],
+                choices=list(org_domain_id_map.keys()),
+                value=list(org_domain_id_map.keys()),
                 label="选择加盟商"
             )
             plot_button = gr.Button("刷新数据", variant="primary")

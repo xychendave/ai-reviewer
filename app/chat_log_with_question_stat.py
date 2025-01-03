@@ -5,11 +5,12 @@ from ashe import get_interval_days, yesterday
 
 from util.db import get_ch_client
 from util.conf import get_conf
+from util.franchisee import get_org_domain_id_map
 
 conf = get_conf()
-
+org_domain_id_map = get_org_domain_id_map()
 clients = {}
-for fr_ns in conf["franchisee"]["ns"]:
+for fr_ns in org_domain_id_map.keys():
     client = get_ch_client(f"{fr_ns}_bigbai")
     clients[fr_ns] = client
 
@@ -130,8 +131,8 @@ def chat_log_with_question_tab():
         with gr.Row():
             days_input = gr.Number(value=conf["franchisee"]["days"], label="查询天数", minimum=1, step=1)
             franchisee_input = gr.Checkboxgroup(
-                choices=conf["franchisee"]["ns"],
-                value=conf["franchisee"]["ns"],
+                choices=list(org_domain_id_map.keys()),
+                value=list(org_domain_id_map.keys()),
                 label="选择加盟商"
             )
             plot_button = gr.Button("刷新数据", variant="primary")
