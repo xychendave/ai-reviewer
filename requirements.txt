@@ -7,3 +7,4 @@ ashe~=0.0.8
 ruamel.yaml~=0.18.6
 clickhouse_driver~=0.2.9
 mysql-connector-python~=8.4.0
+openpyxl~=3.1.5
