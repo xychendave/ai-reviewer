@@ -12,11 +12,13 @@ from util.franchisee import get_user_info, get_user_department, get_online_time,
 
 conf = get_conf()
 
+DEFAULT_RECEPTION_RATIO = 4
 PLATFORM_RECEPTION_RATIO = {
     "淘系": 4,
     "抖音": 5,
     "拼多多": 3.5
 }
+PRICE = 0.01
 
 # 获取情景回复数据
 def get_df_scene(franchisee, start_date, end_date):
@@ -98,8 +100,8 @@ def get_df_shop_count(franchisee, start_date, end_date):
     df_shop_count_uni.columns = ['平台', '用户ID', '店铺数量']
     return df_shop_count_uni
 
-def get_settlement(franchisee, start_date, end_date, use_cache="是"):
-    print(franchisee, start_date, end_date)
+def get_settlement(franchisee, start_date, end_date, discount_input, use_cache="是"):
+    print(franchisee, start_date, end_date, discount_input)
     if type(start_date) == datetime:
         start_date = start_date.date().isoformat()
     if type(end_date) == datetime:
@@ -111,7 +113,7 @@ def get_settlement(franchisee, start_date, end_date, use_cache="是"):
     else:
         fr_list = [franchisee]
 
-    output_file = Path(f'./data/{franchisee}_{start_date}至{end_date}_结算金额表.xlsx')
+    output_file = Path(f'./data/{franchisee}_{discount_input}折_{start_date}至{end_date}_结算金额表.xlsx')
 
     # 检查文件是否存在且是否使用缓存
     if output_file.exists() and use_cache == "是":
@@ -134,11 +136,15 @@ def get_settlement(franchisee, start_date, end_date, use_cache="是"):
         df_with_shop_count_and_scene = pd.merge(df_with_shop_count, df_scene_data, how='left', on=['平台', '用户ID']).fillna(0)
 
         df_with_shop_count_and_scene["机器人接待人次"] = df_with_shop_count_and_scene.apply(
-            lambda row: round((row["机器人回复问题数"] + (row["情景回复数"] / 2)) / PLATFORM_RECEPTION_RATIO[row["平台"]], 2), axis=1)
+            lambda row: round((row["机器人回复问题数"] + (row["情景回复数"] / 2)) / PLATFORM_RECEPTION_RATIO.get(row["平台"], DEFAULT_RECEPTION_RATIO), 2), axis=1)
         df_with_shop_count_and_scene["预计人力成本（按照流量计算）"] = round(df_with_shop_count_and_scene["机器人接待人次"] * 0.134, 2)
+        df_with_shop_count_and_scene["总回复数"] = df_with_shop_count_and_scene["机器人回复问题数"] + df_with_shop_count_and_scene["情景回复数"]
+        df_with_shop_count_and_scene["流量结算金额"] = df_with_shop_count_and_scene["总回复数"] * PRICE
+        df_with_shop_count_and_scene["折扣"] = f"{discount_input}折"
+        df_with_shop_count_and_scene["流量结算金额（折扣）"] = df_with_shop_count_and_scene["总回复数"] * PRICE * discount_input * 0.1
 
         df_merge = df_with_shop_count_and_scene.groupby(["用户ID", "客服姓名", "手机号", "客服部门"]).sum(
-            ["总接待人次", "总问题数", "机器人应回复问题数", "机器人识别问题数", "机器人回复问题数"])
+            ["总接待人次", "总问题数", "机器人应回复问题数", "机器人识别问题数", "机器人回复问题数", "总回复数"])
         online_hours = get_online_time(franchisee, start_date, end_date)
         df_merge["总在线时长"] = [online_hours.get(x, 0) for x in df_merge.index.get_level_values("用户ID").values]
         df_merge["预计坐席基数"] = df_merge["总在线时长"].apply(lambda x: max(0, x - (30 * 2)) // (30 * 8) + 1)
@@ -154,8 +160,16 @@ def get_settlement(franchisee, start_date, end_date, use_cache="是"):
         df_merge_new = df_merge.reset_index()
         df_merge_new = df_merge_new[df_merge_new["客服部门"].apply(lambda x: x.split("/")[-1] != "系统部门")]
         df_merge_new = df_merge_new.drop(columns=["用户ID"])
+        df_merge_new["流量结算金额"] = df_merge_new["总回复数"] * PRICE
+        df_merge_new["折扣"] = f"{discount_input}折"
+        df_merge_new["流量结算金额（折扣）"] = df_merge_new["总回复数"] * PRICE * discount_input * 0.1
 
-
+        df_merge_new = df_merge_new[[
+            '客服姓名', '手机号', '客服部门', '总接待人次', '总问题数', '机器人应回复问题数', '机器人识别问题数', '机器人回复问题数',
+            '净识别率', '净回复率', '配置率', '店铺数量', '情景回复数', '机器人接待人次', '预计人力成本（按照流量计算）', '总在线时长',
+            '预计坐席基数', '预计结算金额', '坐席基数（新人优惠活动）', '实际结算金额（新人优惠活动）', '结算率', '总回复数',
+            '流量结算金额', '折扣', '流量结算金额（折扣）'
+        ]]
         # 汇总结算
         total_sum = [{
             "公司名称": franchisee,
@@ -170,7 +184,11 @@ def get_settlement(franchisee, start_date, end_date, use_cache="是"):
             "实际结算金额（新人优惠活动）": int(df_merge_new["实际结算金额（新人优惠活动）"].sum()),
             "预计节省人力总成本": int(int(df_merge_new["预计人力成本（按照流量计算）"].sum()) - int(df_merge_new["实际结算金额（新人优惠活动）"].sum())),
             "新人优惠活动减免成本": int(int(df_merge_new["预计结算金额"].sum()) - int(df_merge_new["实际结算金额（新人优惠活动）"].sum())),
-            "结算率": str(round(int(df_merge_new["实际结算金额（新人优惠活动）"].sum()) * 100 / int(df_merge_new["预计人力成本（按照流量计算）"].sum()), 2)) + "%"
+            "结算率": str(round(int(df_merge_new["实际结算金额（新人优惠活动）"].sum()) * 100 / int(df_merge_new["预计人力成本（按照流量计算）"].sum()), 2)) + "%",
+            "总回复数": df_merge_new["总回复数"].sum(),
+            "流量结算金额": int(df_merge_new["总回复数"].sum() * PRICE),
+            "折扣": f"{discount_input}折",
+            "流量结算金额（折扣）": int(df_merge_new["总回复数"].sum() * PRICE * discount_input * 0.1)
         }]
 
         if len(fr_list) == 1:
@@ -183,6 +201,7 @@ def get_settlement(franchisee, start_date, end_date, use_cache="是"):
             df_taobao = df_with_shop_count_and_scene[df_with_shop_count_and_scene['平台'] == '淘系']
             df_douyin = df_with_shop_count_and_scene[df_with_shop_count_and_scene['平台'] == '抖音']
             df_pinduoduo = df_with_shop_count_and_scene[df_with_shop_count_and_scene['平台'] == '拼多多']
+            df_xiaohongshu = df_with_shop_count_and_scene[df_with_shop_count_and_scene['平台'] == '小红书']
 
             # 导出表格为Excel文件，每个平台一个sheet
             with pd.ExcelWriter(output_file) as writer:
@@ -191,6 +210,7 @@ def get_settlement(franchisee, start_date, end_date, use_cache="是"):
                 df_taobao.to_excel(writer, sheet_name='淘系', index=False)
                 df_douyin.to_excel(writer, sheet_name='抖音', index=False)
                 df_pinduoduo.to_excel(writer, sheet_name='拼多多', index=False)
+                df_xiaohongshu.to_excel(writer, sheet_name='小红书', index=False)
 
             print(f"表格已导出至 {output_file}")
             return df_total, str(output_file)
@@ -206,6 +226,11 @@ def get_settlement(franchisee, start_date, end_date, use_cache="是"):
 def check_date(s_date, e_date):
     if e_date < s_date:
         gr.Warning("开始日期不能大于结束日期")
+
+def validate_discount(discount):
+    if discount < 1 or discount > 10:
+        return 5  # 返回默认值
+    return discount
 
 def settlement_tab():
     org_domain_id_map = get_org_domain_id_map()
@@ -233,6 +258,14 @@ def settlement_tab():
                         interactive=True,
                         type="value"
                     )
+                    discount_input = gr.Number(
+                        label="折扣（1-10）",
+                        value=5,
+                        precision=1,
+                        step=0.1,
+                        minimum=1,
+                        maximum=10,
+                    )
 
             with gr.Row():
                 file_output = gr.File(label="下载结算表格")
@@ -243,11 +276,16 @@ def settlement_tab():
 
         start_date.change(check_date, inputs=[start_date, end_date])
         end_date.change(check_date, inputs=[start_date, end_date])
+        discount_input.change(
+            validate_discount,
+            inputs=[discount_input],
+            outputs=[discount_input]
+        )
 
         # 点击按钮调用get_settlement生成表格
         button.click(
             get_settlement,
-            inputs=[franchisee_input, start_date, end_date, use_cache],
+            inputs=[franchisee_input, start_date, end_date, discount_input, use_cache],
             outputs=[df_preview, file_output]
         )
 
