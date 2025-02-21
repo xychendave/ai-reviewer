@@ -21,28 +21,23 @@ def review_tab():
                     type="binary"
                 )
                 review_button = gr.Button("开始评审", variant="primary")
-                # 添加进度显示
-                progress_output = gr.Markdown("准备就绪", label="评审进度")
-                # 添加token统计显示
-                token_output = gr.Markdown("", label="Token统计")
+                progress_output = gr.Markdown("准备就绪")
             
             # 右侧列：显示评审结果
             with gr.Column(scale=2):
-                review_output = gr.Markdown(
-                    label="评审结果",
-                    show_label=True,
-                )
+                review_output = gr.Markdown()
                 copy_button = gr.Button("复制结果")
 
         def review_wrapper(file):
             if file is None:
-                yield "请先上传PDF文件", "请先上传PDF文件", ""
-                return
+                return "请先上传PDF文件", "请先上传PDF文件"
             
             progress_updates = []
+
             def update_progress(msg):
-                progress_updates.append(msg)
-                yield None, "\n".join(progress_updates), ""
+                if msg not in progress_updates:  # 避免重复消息
+                    progress_updates.append(msg)
+                    return "\n".join(progress_updates)
             
             try:
                 update_progress("1. 开始处理PDF文件...")
@@ -52,63 +47,53 @@ def review_tab():
                 
                 update_progress("2. PDF文件加载中...")
                 
-                # 创建生成器来处理评审过程
-                for progress in review_paper(
-                    temp_path,
-                    progress_callback=update_progress
-                ):
+                review_result = None
+                for progress in review_paper(temp_path, progress_callback=update_progress):
+                    if progress is None:
+                        continue
                     if isinstance(progress, tuple):
-                        result, token_stats = progress
-                        # 生成token统计markdown
-                        token_md = f"""
-### Token 使用统计
-- 输入tokens: {token_stats['prompt_tokens']:,}
-- 输出tokens: {token_stats['completion_tokens']:,}
-- 总计tokens: {token_stats['total_tokens']:,}
-- 预估费用: ¥{token_stats['total_cost']:.4f}
-
-*定价: ¥0.05/千tokens*
-"""
-                        # 生成评审结果markdown
-                        markdown_result = f"""
-## 评审结果
-
-**总体评分**: {result['Overall']}/10
-**决定**: {result['Decision']}
-
-### 优点
-{chr(10).join([f'- {s}' for s in result['Strengths']])}
-
-### 缺点
-{chr(10).join([f'- {w}' for w in result['Weaknesses']])}
-
-### 问题
-{chr(10).join([f'- {q}' for q in result['Questions']])}
-
-### 详细评分
-- 原创性: {result['Originality']}/4
-- 质量: {result['Quality']}/4
-- 清晰度: {result['Clarity']}/4
-- 重要性: {result['Significance']}/4
-- 技术可靠性: {result['Soundness']}/4
-- 展示: {result['Presentation']}/4
-- 贡献: {result['Contribution']}/4
-- 置信度: {result['Confidence']}/5
-"""
+                        result, stats = progress
+                        review_result = result
+                        # 直接将结果转换为字符串显示
+                        review_text = [
+                            "## 评审结果",
+                            f"总体评分: {result.get('Overall', 'N/A')}/10",
+                            f"决定: {result.get('Decision', 'N/A')}",
+                            "",
+                            "### 优点",
+                            *[f"- {s}" for s in result.get('Strengths', [])],
+                            "",
+                            "### 缺点",
+                            *[f"- {w}" for w in result.get('Weaknesses', [])],
+                            "",
+                            "### 问题",
+                            *[f"- {q}" for q in result.get('Questions', [])],
+                            "",
+                            "### Token统计",
+                            f"- 总计tokens: {stats.get('total_tokens', 0):,}",
+                            f"- 预估费用: ¥{stats.get('total_cost', 0):.4f}",
+                        ]
+                        
                         update_progress("✅ 评审完成!")
-                        yield markdown_result, "\n".join(progress_updates), token_md
+                        return "\n".join(review_text), "\n".join(progress_updates)
+                    else:
+                        progress_text = update_progress(progress)
+                        yield "", progress_text
+                
+                if review_result is None:
+                    return "评审未完成", "\n".join(progress_updates)
                     
             except Exception as e:
                 error_msg = f"❌ 评审过程出错: {str(e)}"
                 update_progress(error_msg)
-                yield "评审失败，请查看进度信息", "\n".join(progress_updates), ""
+                return "评审失败", "\n".join(progress_updates)
             finally:
                 os.unlink(temp_path)
 
         review_button.click(
             fn=review_wrapper,
             inputs=[pdf_input],
-            outputs=[review_output, progress_output, token_output],
+            outputs=[review_output, progress_output],
             show_progress=True
         )
 

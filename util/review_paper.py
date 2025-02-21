@@ -25,8 +25,7 @@ def review_paper(paper_path, api_key=API_KEY, api_base=API_BASE, model=MODEL, pr
     def update_progress(msg):
         if progress_callback:
             progress_callback(msg)
-        print(msg)
-        yield None  # 生成进度更新
+        print(f"[DEBUG] {msg}")  # 添加调试标记
     
     token_stats = {
         'prompt_tokens': 0,
@@ -44,30 +43,38 @@ def review_paper(paper_path, api_key=API_KEY, api_base=API_BASE, model=MODEL, pr
     
     try:
         # 加载论文
-        yield from update_progress("3. 正在解析PDF内容...")
+        update_progress("3. 正在解析PDF内容...")
         paper_txt = load_paper(paper_path)
         
         # 执行评审
-        yield from update_progress("4. 开始生成评审意见...")
-        review, stats = perform_review(
+        update_progress("4. 开始生成评审意见...")
+        result = perform_review(
             paper_txt,
             model=model,
             client=client,
             num_reflections=5,
             num_fs_examples=1,
             num_reviews_ensemble=5,
-            progress_callback=lambda msg: next(update_progress(msg))
+            progress_callback=update_progress  # 直接传递update_progress
         )
+        
+        if isinstance(result, tuple):
+            review, stats = result
+        else:
+            review = result
+            stats = {'prompt_tokens': 0, 'completion_tokens': 0}
         
         # 更新token统计
         token_stats['prompt_tokens'] += stats['prompt_tokens']
         token_stats['completion_tokens'] += stats['completion_tokens']
-        token_stats['total_tokens'] = (token_stats['prompt_tokens'] + 
-                                     token_stats['completion_tokens'])
+        token_stats['total_tokens'] = (
+            token_stats['prompt_tokens'] +
+            token_stats['completion_tokens']
+        )
         # GLM-4-Plus 定价：0.05元/千tokens
         token_stats['total_cost'] = token_stats['total_tokens'] * 0.05 / 1000
         
-        yield from update_progress(f"""
+        update_progress(f"""
 Token 使用统计:
 - 输入tokens: {token_stats['prompt_tokens']}
 - 输出tokens: {token_stats['completion_tokens']}
@@ -75,7 +82,7 @@ Token 使用统计:
 - 预估费用: ¥{token_stats['total_cost']:.4f}
 """)
         
-        yield from update_progress("5. 保存评审结果...")
+        update_progress("5. 保存评审结果...")
         # 保存评审结果
         output_dir = os.path.dirname(paper_path)
         output_path = os.path.join(output_dir, "review.txt")
@@ -95,7 +102,7 @@ Token 使用统计:
         yield review, token_stats  # 生成最终结果
             
     except Exception as e:
-        yield from update_progress(f"评审过程出错: {str(e)}")
+        update_progress(f"评审过程出错: {str(e)}")
         raise e
 
 if __name__ == "__main__":
